@@ -1,0 +1,26 @@
+[Unit]
+Description=Pi Mobile Web - private Pi coding-agent console
+# Never stop trying to restart, even after repeated quick failures.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=__REPO_ROOT__
+Environment=PORT=8787
+# Optional: copy this unit to ~/.config/systemd/user/ and set a token here, or
+# run the installer with PI_WEB_TOKEN in your shell to keep API/WebSocket access private.
+Environment="PI_WEB_TOKEN=__PI_WEB_TOKEN__"
+# Avoid global Claude MCP bridge background autoload in this web service: it can
+# crash the process when a browser session is closed while MCP startup is still running.
+Environment=PI_CLAUDE_MCP_AUTOLOAD=off
+# PATH is filled in by scripts/install-service.sh so npm/node and shelled-out
+# tools resolve under user systemd.
+Environment="PATH=__SERVICE_PATH__"
+# `npm start` builds (tsc) then runs, so source changes are picked up on every
+# (re)start. The whole tree is tracked via the service cgroup.
+ExecStart=__NPM_BIN__ start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Pi Mobile Web after synced file changes
+
+[Service]
+Type=oneshot
+# Debounce bursts from Syncthing/editor saves so one sync batch usually causes one restart.
+ExecStart=/bin/sh -lc 'sleep 2; systemctl --user daemon-reload; systemctl --user restart pi-mobile-web.service'

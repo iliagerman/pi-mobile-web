@@ -1,0 +1,15 @@
+[Unit]
+Description=Watch Pi Mobile Web files and restart service on changes
+
+[Path]
+PathChanged=__REPO_ROOT__/src
+PathChanged=__REPO_ROOT__/public
+PathChanged=__REPO_ROOT__/package.json
+PathChanged=__REPO_ROOT__/package-lock.json
+PathChanged=__REPO_ROOT__/tsconfig.json
+PathChanged=__REPO_ROOT__/deploy/pi-mobile-web.service
+PathChanged=__REPO_ROOT__/deploy/pi-mobile-web-restart.service
+Unit=pi-mobile-web-restart.service
+
+[Install]
+WantedBy=default.target

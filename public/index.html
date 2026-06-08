@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pi Mobile Console</title>
+    <meta name="theme-color" content="#080908" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Pi Console" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="view-sessions">
+    <div class="shell">
+      <aside class="rail" aria-label="Projects">
+        <div class="brand">
+          <div class="brand-mark">π</div>
+          <div>
+            <strong>Pi Console</strong>
+            <span>private mobile cockpit</span>
+          </div>
+        </div>
+        <button class="primary" id="newProjectButton" type="button">+ Project</button>
+        <label class="search-shell" for="projectSearchInput">
+          <span class="sr-only">Search projects</span>
+          <input id="projectSearchInput" type="search" autocomplete="off" placeholder="Search projects" />
+        </label>
+        <div class="section-title">Projects</div>
+        <div class="project-list" id="projectList"></div>
+      </aside>
+
+      <aside class="sessions" aria-label="Sessions">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">Workspace</span>
+            <h1 id="projectName">No project selected</h1>
+            <p id="projectPath">Create or select a local folder.</p>
+          </div>
+        </div>
+        <button class="primary wide" id="newSessionButton" type="button" disabled>Spin up Pi</button>
+        <div class="section-title">Pi instances</div>
+        <div class="session-list" id="sessionList"></div>
+      </aside>
+
+      <main class="chat" aria-label="Chat with Pi">
+        <header class="chat-topbar">
+          <button class="ghost mobile-only menu-button" id="toggleProjectsButton" type="button" aria-label="Open project menu">☰</button>
+          <div class="chat-title-block">
+            <span class="eyebrow">Active chat</span>
+            <h2 id="sessionTitle">Select a Pi instance</h2>
+            <div class="mini-status" id="miniStatus">No model loaded</div>
+          </div>
+          <div class="chat-actions">
+            <div class="model-shortcuts" id="modelShortcuts" aria-label="Model shortcuts"></div>
+            <button class="ghost compact" id="cycleModelButton" type="button" disabled>Cycle</button>
+            <button class="ghost compact" id="installAppButton" type="button" hidden>Install</button>
+            <button class="ghost compact" id="renameSessionButton" type="button" disabled>Rename</button>
+            <button class="ghost compact danger" id="abortButton" type="button" disabled>Stop</button>
+            <div class="status-pill" id="connectionStatus">Idle</div>
+          </div>
+        </header>
+
+        <section class="messages" id="messages" aria-live="polite">
+          <div class="empty-state">
+            <div class="orb">π</div>
+            <h2>Your server-side Pi, in your pocket.</h2>
+            <p>Select a project, start a Pi instance, and stream coding-agent work from your phone over Tailscale.</p>
+          </div>
+        </section>
+
+        <div class="command-strip" aria-label="Quick slash commands">
+          <button type="button" data-command="/help">/help</button>
+          <button type="button" data-command="/skill:">/skill</button>
+          <button type="button" data-command="/model">/model</button>
+          <button type="button" data-command="/tools">/tools</button>
+          <button type="button" data-command="/compact">/compact</button>
+        </div>
+        <form class="composer" id="composer">
+          <div class="attachment-list" id="attachmentList" aria-live="polite"></div>
+          <div class="composer-row">
+            <input class="sr-only" id="attachmentInput" type="file" multiple accept="image/*,.txt,.md,.markdown,.json,.yaml,.yml,.csv,.tsv,.log,.js,.jsx,.ts,.tsx,.py,.rb,.go,.rs,.java,.kt,.swift,.css,.scss,.html,.xml,.sh,.env" />
+            <button class="ghost attach-button" id="attachButton" type="button" disabled>Attach</button>
+            <label class="sr-only" for="messageInput">Message Pi</label>
+            <textarea id="messageInput" rows="1" placeholder="Type /skill:name, /help, or ask Pi to work..." disabled></textarea>
+            <button class="send" id="sendButton" type="submit" disabled>Send</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <nav class="mobile-nav" aria-label="Mobile navigation">
+      <button class="active" id="navProjectsButton" type="button">Projects</button>
+      <button id="navSessionsButton" type="button">Instances</button>
+      <button id="navChatButton" type="button">Chat</button>
+    </nav>
+
+    <div class="install-banner" id="installBanner" role="dialog" aria-label="Install Pi Console" hidden>
+      <div class="install-banner-mark">π</div>
+      <div class="install-banner-copy">
+        <strong>Install Pi Console</strong>
+        <span>Add it to your home screen for a full-screen, app-like experience.</span>
+      </div>
+      <div class="install-banner-actions">
+        <button class="ghost compact" id="dismissInstallButton" type="button">Not now</button>
+        <button class="primary compact" id="installBannerButton" type="button">Install</button>
+      </div>
+    </div>
+
+    <dialog id="renameDialog">
+      <form method="dialog" class="dialog-card" id="renameForm">
+        <div>
+          <span class="eyebrow">Session label</span>
+          <h2>Rename Pi instance</h2>
+          <p>This changes the display name used in the session list.</p>
+        </div>
+        <label>
+          Name
+          <input id="sessionNameInput" name="name" autocomplete="off" placeholder="Feature review" />
+        </label>
+        <div class="dialog-actions">
+          <button class="ghost" value="cancel" type="button" id="cancelRenameButton">Cancel</button>
+          <button class="primary" value="default" type="submit">Save name</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="projectDialog">
+      <form method="dialog" class="dialog-card" id="projectForm">
+        <div>
+          <span class="eyebrow">New workspace</span>
+          <h2>Add project folder</h2>
+          <p>Point Pi at a local folder on this home server. The folder is created if it does not exist.</p>
+        </div>
+        <label>
+          Project name
+          <input id="projectNameInput" name="name" autocomplete="off" placeholder="Home assistant plugins" required />
+        </label>
+        <label>
+          Local folder path
+          <input id="projectPathInput" name="path" autocomplete="off" placeholder="/home/you/code/project" required />
+        </label>
+        <div class="dialog-actions">
+          <button class="ghost" value="cancel" type="button" id="cancelProjectButton">Cancel</button>
+          <button class="primary" value="default" type="submit">Create project</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
