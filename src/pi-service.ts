@@ -122,9 +122,22 @@ function isDeprecatedDefault(model: AvailableModel | undefined): boolean {
   return String(model.provider) === "google" && String(model.id).startsWith("gemini-2.0");
 }
 
+function configuredPreferredModel(): AvailableModel | undefined {
+  const configured = process.env.PI_MOBILE_WEB_MODEL?.trim();
+  if (!configured) return undefined;
+
+  const [provider, ...modelParts] = configured.split("/");
+  const modelId = modelParts.join("/");
+  if (!provider || !modelId) return undefined;
+
+  return modelRegistry.find(provider, modelId);
+}
+
 function preferredModel(): AvailableModel | undefined {
   const available = modelRegistry.getAvailable();
   return (
+    configuredPreferredModel() ??
+    available.find((model) => model.provider === "openai" && model.id === "gpt-5.5") ??
     available.find((model) => model.provider === "openai-codex" && model.id === "gpt-5.4") ??
     available.find((model) => model.provider === "google" && model.id === "gemini-3.1-pro-preview") ??
     available.find((model) => model.provider === "google" && model.id === "gemini-2.5-pro") ??

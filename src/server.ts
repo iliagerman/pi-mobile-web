@@ -327,6 +327,11 @@ async function handleSocketCommand(socket: WebSocket, handle: PiSessionHandle, r
     return;
   }
 
+  if (payload.type === "ping") {
+    send(socket, { type: "pong" });
+    return;
+  }
+
   if (payload.type === "setModel") {
     if (!payload.provider || !payload.modelId) throw new Error("Missing model selection");
     await setSessionModel(handle.session, payload.provider, payload.modelId);

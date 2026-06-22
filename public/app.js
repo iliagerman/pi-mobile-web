@@ -1,3 +1,5 @@
+import { renderMarkdown } from "./markdown.js";
+
 const state = {
   projects: [],
   sessions: [],
@@ -5,6 +7,8 @@ const state = {
   activeSessionPath: localStorage.getItem("piWebActiveSessionPath"),
   socket: null,
   reconnectTimer: null,
+  heartbeatTimer: null,
+  lastPongAt: 0,
   assistantBubble: null,
   thinkingBubble: null,
   toolBubbles: new Map(),
@@ -370,21 +374,43 @@ function prettyText(text) {
   return `${header}\n${prettyJson(body) || body}`;
 }
 
-function setBubbleText(bubble, text) {
-  const content = bubble.querySelector(".message-content") || bubble;
-  content.textContent = prettyText(text);
+function stickyScroll() {
   elements.messages.scrollTop = elements.messages.scrollHeight;
+}
+
+function renderBubbleContent(bubble, text) {
+  bubble._raw = text;
+  const content = bubble.querySelector(".message-content") || bubble;
+  const role = bubble.dataset.role;
+  if (role === "assistant" || role === "user") {
+    if (bubble._mdRaf) cancelAnimationFrame(bubble._mdRaf);
+    bubble._mdRaf = requestAnimationFrame(() => {
+      bubble._mdRaf = 0;
+      renderMarkdown(content, text);
+      stickyScroll();
+    });
+  } else {
+    content.textContent = prettyText(text);
+    stickyScroll();
+  }
+}
+
+// Kept for backwards compatibility with any direct callers.
+function setBubbleText(bubble, text) {
+  renderBubbleContent(bubble, text);
 }
 
 function appendMessage(role, text) {
   const bubble = document.createElement("article");
   bubble.className = `message ${role}`;
-  const content = document.createElement("pre");
-  content.className = "message-content";
+  bubble.dataset.role = role;
+  const isMarkdown = role === "assistant" || role === "user";
+  const content = document.createElement(isMarkdown ? "div" : "pre");
+  content.className = `message-content${isMarkdown ? " md" : ""}`;
   bubble.append(content);
-  setBubbleText(bubble, text);
+  renderBubbleContent(bubble, text);
   elements.messages.append(bubble);
-  elements.messages.scrollTop = elements.messages.scrollHeight;
+  stickyScroll();
   return bubble;
 }
 
@@ -509,21 +535,77 @@ async function selectProject(projectId, shouldRender = true) {
   setMobileView("sessions");
 }
 
+function socketOpen() {
+  return Boolean(state.socket && state.socket.readyState === WebSocket.OPEN);
+}
+
 function closeSocket() {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
+  stopHeartbeat();
   const socket = state.socket;
   state.socket = null;
   if (socket) socket.close();
   setStatus("Idle");
 }
 
-function scheduleReconnect(sessionPath) {
-  if (state.reconnectTimer || !state.activeProjectId || !sessionPath) return;
+function scheduleReconnect(sessionPath, delay = 1500) {
+  if (!state.activeProjectId || !sessionPath) return;
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
     openSession(sessionPath, elements.sessionTitle.textContent || "Pi session", true);
-  }, 1500);
+  }, delay);
+}
+
+function startHeartbeat() {
+  stopHeartbeat();
+  state.lastPongAt = Date.now();
+  state.heartbeatTimer = setInterval(() => {
+    if (!state.socket) return;
+    if (state.socket.readyState === WebSocket.OPEN) {
+      if (Date.now() - state.lastPongAt > 45000) {
+        // Connection looks dead (no pong in 3+ intervals). Force a reconnect.
+        resumeConnection(true);
+        return;
+      }
+      state.socket.send(JSON.stringify({ type: "ping" }));
+    } else if (state.socket.readyState === WebSocket.CLOSING || state.socket.readyState === WebSocket.CLOSED) {
+      resumeConnection(true);
+    }
+  }, 15000);
+}
+
+function stopHeartbeat() {
+  if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
+  state.heartbeatTimer = null;
+}
+
+// Proactively restore the session connection. Mobile browsers freeze JS timers
+// and kill sockets when the app is backgrounded or the screen locks, so the
+// WebSocket "close" event often only fires after the user returns. This is
+// called on visibilitychange / pageshow / online and from the heartbeat.
+function resumeConnection(force = false) {
+  if (!state.activeProjectId || !state.activeSessionPath) return;
+  const fresh = Date.now() - state.lastPongAt < 40000;
+  if (!force && socketOpen() && fresh) {
+    // Looks healthy — probe anyway so we notice zombies quickly.
+    sendSocket({ type: "ping" });
+    return;
+  }
+  if (state.socket) {
+    const stale = state.socket;
+    state.socket = null;
+    try {
+      stale.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  setStatus("Reconnecting…", true);
+  elements.miniStatus.textContent = "Reconnecting…";
+  setComposerEnabled(false);
+  scheduleReconnect(state.activeSessionPath, 250);
 }
 
 function websocketUrl(sessionPath) {
@@ -553,11 +635,13 @@ function openSession(sessionPath, title = "New Pi instance", preserveChat = fals
 
   socket.addEventListener("open", () => {
     setStatus("Connected", true);
+    startHeartbeat();
     loadModels().catch((error) => toast(error.message));
     sendSocket({ type: "models" });
   });
   socket.addEventListener("close", () => {
     if (state.socket !== socket) return;
+    stopHeartbeat();
     setStatus("Reconnecting…");
     elements.miniStatus.textContent = "Disconnected — reconnecting…";
     setComposerEnabled(false);
@@ -568,6 +652,10 @@ function openSession(sessionPath, title = "New Pi instance", preserveChat = fals
 }
 
 function handleSocketMessage(payload) {
+  if (payload.type === "pong") {
+    state.lastPongAt = Date.now();
+    return;
+  }
   if (payload.type === "ready") {
     setComposerEnabled(true);
     state.activeSessionPath = payload.sessionFile;
@@ -598,14 +686,14 @@ function handleSocketMessage(payload) {
   if (payload.type === "textDelta") {
     clearThinkingBubble();
     if (!state.assistantBubble) state.assistantBubble = appendMessage("assistant", "");
-    const currentText = state.assistantBubble.querySelector(".message-content")?.textContent || "";
-    setBubbleText(state.assistantBubble, `${currentText}${payload.text}`);
+    const currentText = state.assistantBubble._raw || "";
+    renderBubbleContent(state.assistantBubble, `${currentText}${payload.text}`);
     return;
   }
   if (payload.type === "assistantFinal") {
     clearThinkingBubble();
     if (!state.assistantBubble) state.assistantBubble = appendMessage("assistant", payload.text);
-    else setBubbleText(state.assistantBubble, payload.text);
+    else renderBubbleContent(state.assistantBubble, payload.text);
     return;
   }
   if (payload.type === "thinkingStart") {
@@ -614,8 +702,8 @@ function handleSocketMessage(payload) {
   }
   if (payload.type === "thinkingDelta") {
     if (!state.thinkingBubble) state.thinkingBubble = appendMessage("thinking", "Thinking…\n");
-    const currentText = state.thinkingBubble.querySelector(".message-content")?.textContent || "";
-    setBubbleText(state.thinkingBubble, `${currentText}${payload.text}`);
+    const currentText = state.thinkingBubble._raw || "";
+    renderBubbleContent(state.thinkingBubble, `${currentText}${payload.text}`);
     return;
   }
   if (payload.type === "thinkingEnd") {
@@ -631,12 +719,12 @@ function handleSocketMessage(payload) {
   if (payload.type === "toolUpdate") {
     const bubble = state.toolBubbles.get(payload.toolCallId) || appendMessage("tool-output", `${payload.toolName}\n`);
     state.toolBubbles.set(payload.toolCallId, bubble);
-    setBubbleText(bubble, `${payload.toolName}\n${payload.text || ""}`);
+    renderBubbleContent(bubble, `${payload.toolName}\n${payload.text || ""}`);
     return;
   }
   if (payload.type === "toolEnd") {
     const bubble = state.toolBubbles.get(payload.toolCallId) || appendMessage("tool-output", `${payload.toolName}\n`);
-    setBubbleText(bubble, `${payload.toolName}${payload.isError ? " failed" : " done"}\n${payload.text || ""}`);
+    renderBubbleContent(bubble, `${payload.toolName}${payload.isError ? " failed" : " done"}\n${payload.text || ""}`);
     return;
   }
   if (payload.type === "assistantError") {
@@ -773,6 +861,18 @@ window.addEventListener("appinstalled", () => {
   updateInstallButton();
   toast("App installed");
 });
+
+// Resume the WebSocket after the phone UI returns to the foreground, after a
+// back/forward cache restore, or when the network comes back online. Without
+// this the connection stays "dropped" until the user sends a follow-up message.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") resumeConnection();
+});
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) resumeConnection(true);
+});
+window.addEventListener("online", () => resumeConnection(true));
+window.addEventListener("focus", () => resumeConnection());
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
