@@ -16,7 +16,12 @@ const state = {
   activeModelKey: "",
   attachments: [],
   installPromptEvent: null,
+  notificationsEnabled: localStorage.getItem("piWebNotifications") === "1",
+  lastTurnStartedAt: 0,
+  stickToBottom: true,
   token: new URLSearchParams(location.search).get("token") || localStorage.getItem("piWebToken") || "",
+  initialProjectId: new URLSearchParams(location.search).get("projectId"),
+  initialSessionPath: new URLSearchParams(location.search).get("sessionPath"),
 };
 
 const elements = {
@@ -28,6 +33,7 @@ const elements = {
   sessionTitle: document.querySelector("#sessionTitle"),
   connectionStatus: document.querySelector("#connectionStatus"),
   messages: document.querySelector("#messages"),
+  jumpLatestButton: document.querySelector("#jumpLatestButton"),
   composer: document.querySelector("#composer"),
   attachmentList: document.querySelector("#attachmentList"),
   attachmentInput: document.querySelector("#attachmentInput"),
@@ -38,6 +44,7 @@ const elements = {
   modelShortcuts: document.querySelector("#modelShortcuts"),
   installAppButton: document.querySelector("#installAppButton"),
   cycleModelButton: document.querySelector("#cycleModelButton"),
+  notifyButton: document.querySelector("#notifyButton"),
   renameSessionButton: document.querySelector("#renameSessionButton"),
   abortButton: document.querySelector("#abortButton"),
   newProjectButton: document.querySelector("#newProjectButton"),
@@ -47,6 +54,8 @@ const elements = {
   cancelProjectButton: document.querySelector("#cancelProjectButton"),
   projectNameInput: document.querySelector("#projectNameInput"),
   projectPathInput: document.querySelector("#projectPathInput"),
+  projectSyncedInput: document.querySelector("#projectSyncedInput"),
+  projectMacPathInput: document.querySelector("#projectMacPathInput"),
   renameDialog: document.querySelector("#renameDialog"),
   renameForm: document.querySelector("#renameForm"),
   sessionNameInput: document.querySelector("#sessionNameInput"),
@@ -82,6 +91,85 @@ function toast(message) {
   node.textContent = message;
   document.body.append(node);
   setTimeout(() => node.remove(), 3200);
+}
+
+function notificationsSupported() {
+  return typeof Notification !== "undefined" && "serviceWorker" in navigator && "PushManager" in window;
+}
+
+function base64UrlToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  return Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+}
+
+function notificationPermissionGranted() {
+  return notificationsSupported() && Notification.permission === "granted";
+}
+
+function syncNotifyButton() {
+  const button = elements.notifyButton;
+  const enabled = state.notificationsEnabled;
+  button.setAttribute("aria-pressed", enabled ? "true" : "false");
+  button.title = enabled ? "Notifications on — tap to turn off" : "Notify when Pi finishes";
+  button.classList.toggle("active", enabled);
+}
+
+async function enableNotifications() {
+  if (!notificationsSupported()) {
+    toast("Push notifications are not supported on this browser");
+    return;
+  }
+  if (Notification.permission !== "granted") {
+    if (Notification.permission === "denied") {
+      toast("Notifications are blocked. Enable them in your browser settings.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      toast("Notification permission was not granted");
+      return;
+    }
+  }
+  state.notificationsEnabled = true;
+  localStorage.setItem("piWebNotifications", "1");
+  syncNotifyButton();
+  await subscribeToPush();
+}
+
+async function subscribeToPush() {
+  if (!state.notificationsEnabled || !state.activeProjectId || !state.activeSessionPath || state.activeSessionPath === "new") return;
+  const registration = await navigator.serviceWorker.ready;
+  const existing = await registration.pushManager.getSubscription();
+  const subscription = existing || await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: base64UrlToUint8Array((await api("/api/push/vapid-public-key")).publicKey),
+  });
+  await api("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({
+      subscription: subscription.toJSON(),
+      projectId: state.activeProjectId,
+      sessionPath: state.activeSessionPath,
+      title: elements.sessionTitle.textContent || "Pi",
+    }),
+  });
+}
+
+async function disableNotifications() {
+  state.notificationsEnabled = false;
+  localStorage.setItem("piWebNotifications", "0");
+  syncNotifyButton();
+  if (!notificationsSupported()) return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return;
+  await api("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint: subscription.endpoint }) });
+  await subscription.unsubscribe();
+}
+
+async function maybeNotifyTurnComplete() {
+  if (state.notificationsEnabled) await subscribeToPush();
 }
 
 function isStandalone() {
@@ -280,17 +368,10 @@ function renderSessions() {
 
   if (!project) return;
   const sessions = state.sessions;
-  if (state.sessions.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "muted";
-    empty.textContent = "No Pi instances yet. Start one above.";
-    elements.sessionList.append(empty);
-    return;
-  }
   if (sessions.length === 0) {
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "No matching Pi instances.";
+    empty.textContent = "No Pi instances yet. Start one above.";
     elements.sessionList.append(empty);
     return;
   }
@@ -343,10 +424,12 @@ function clearThinkingBubble() {
 }
 
 function clearChat() {
-  elements.messages.replaceChildren();
+  elements.messages.replaceChildren(elements.jumpLatestButton);
   state.assistantBubble = null;
   state.thinkingBubble = null;
   state.toolBubbles.clear();
+  state.stickToBottom = true;
+  syncJumpButton();
 }
 
 function prettyText(text) {
@@ -374,30 +457,95 @@ function prettyText(text) {
   return `${header}\n${prettyJson(body) || body}`;
 }
 
-function stickyScroll() {
+function isNearBottom() {
+  const node = elements.messages;
+  return node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+}
+
+function syncJumpButton() {
+  elements.jumpLatestButton.hidden = state.stickToBottom;
+}
+
+// Follow the stream only while the user is at (or near) the bottom, so
+// scrolling up to read is never hijacked by incoming deltas.
+function stickyScroll(force = false) {
+  if (force) state.stickToBottom = true;
+  syncJumpButton();
+  if (!state.stickToBottom) return;
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
-function renderBubbleContent(bubble, text) {
-  bubble._raw = text;
-  const content = bubble.querySelector(".message-content") || bubble;
-  const role = bubble.dataset.role;
-  if (role === "assistant" || role === "user") {
-    if (bubble._mdRaf) cancelAnimationFrame(bubble._mdRaf);
-    bubble._mdRaf = requestAnimationFrame(() => {
-      bubble._mdRaf = 0;
-      renderMarkdown(content, text);
-      stickyScroll();
-    });
-  } else {
-    content.textContent = prettyText(text);
-    stickyScroll();
-  }
+function toolDownloadUrl(filePath) {
+  if (!state.activeProjectId || !filePath) return null;
+  const url = `/api/projects/${encodeURIComponent(state.activeProjectId)}/file?path=${encodeURIComponent(filePath)}`;
+  // Plain <a> clicks cannot send the Authorization header, so pass the token
+  // as a query parameter (the server accepts both).
+  return state.token ? `${url}&token=${encodeURIComponent(state.token)}` : url;
 }
 
-// Kept for backwards compatibility with any direct callers.
-function setBubbleText(bubble, text) {
-  renderBubbleContent(bubble, text);
+const FILE_PATH_RE = /(^|[\s()\[\]{}'"])((?:\.\/?|\.\.\/|(?:\/|[A-Z]:\\)?(?:[\w.-]+\/)+)[\w.-]+\.[A-Za-z0-9]{1,8})/g;
+const TOOL_OUTPUT_DISPLAY_LIMIT = 20000;
+
+function renderToolContent(container, text) {
+  let source = String(text ?? "");
+  if (source.length > TOOL_OUTPUT_DISPLAY_LIMIT) {
+    source = `… showing last ${TOOL_OUTPUT_DISPLAY_LIMIT} characters …\n${source.slice(-TOOL_OUTPUT_DISPLAY_LIMIT)}`;
+  }
+  FILE_PATH_RE.lastIndex = 0;
+  let last = 0;
+  let match;
+  const nodes = [];
+  while ((match = FILE_PATH_RE.exec(source))) {
+    const [full, prefix, candidate] = match;
+    // Skip things that look like version numbers or URLs (contains :// ).
+    if (candidate.includes("://") || /^\d+(\.\d+)+$/.test(candidate)) {
+      nodes.push(document.createTextNode(source.slice(last, match.index + full.length)));
+      last = match.index + full.length;
+      continue;
+    }
+    if (match.index > last) nodes.push(document.createTextNode(source.slice(last, match.index)));
+    if (prefix) nodes.push(document.createTextNode(prefix));
+    const href = toolDownloadUrl(candidate);
+    if (href) {
+      const anchor = document.createElement("a");
+      anchor.className = "tool-download";
+      anchor.href = href;
+      anchor.download = "";
+      anchor.target = "_blank";
+      anchor.rel = "noopener noreferrer";
+      anchor.textContent = candidate;
+      nodes.push(anchor);
+      nodes.push(document.createTextNode(" "));
+      const open = document.createElement("a");
+      open.className = "tool-download-open";
+      open.textContent = "↓";
+      open.title = `Download ${candidate}`;
+      open.href = href;
+      open.download = "";
+      nodes.push(open);
+    } else {
+      nodes.push(document.createTextNode(candidate));
+    }
+    last = match.index + full.length;
+  }
+  if (last < source.length) nodes.push(document.createTextNode(source.slice(last)));
+  container.replaceChildren(...nodes);
+}
+
+// Renders are coalesced with requestAnimationFrame so a burst of streaming
+// deltas costs at most one re-render per frame, regardless of bubble type.
+function renderBubbleContent(bubble, text) {
+  bubble._raw = text;
+  if (bubble._renderRaf) return;
+  bubble._renderRaf = requestAnimationFrame(() => {
+    bubble._renderRaf = 0;
+    const content = bubble.querySelector(".message-content") || bubble;
+    const role = bubble.dataset.role;
+    if (role === "assistant" || role === "user") renderMarkdown(content, bubble._raw);
+    else if (role === "tool-output") renderToolContent(content, bubble._raw);
+    else content.textContent = prettyText(bubble._raw);
+    stickyScroll();
+  });
 }
 
 function appendMessage(role, text) {
@@ -409,7 +557,7 @@ function appendMessage(role, text) {
   content.className = `message-content${isMarkdown ? " md" : ""}`;
   bubble.append(content);
   renderBubbleContent(bubble, text);
-  elements.messages.append(bubble);
+  elements.messages.insertBefore(bubble, elements.jumpLatestButton);
   stickyScroll();
   return bubble;
 }
@@ -454,7 +602,7 @@ function updateStatus(status) {
 
 function preferredUiModels(models) {
   const desired = [
-    { provider: "zai", id: "glm-5.1" },
+    { provider: "zai", id: "glm-5.2" },
     { provider: "openai-codex", id: "gpt-5.5" },
     { provider: "openai-codex", id: "gpt-5.4" },
   ];
@@ -491,9 +639,20 @@ async function loadModels() {
 }
 
 async function loadProjects() {
-  await loadModels().catch((error) => console.warn("Could not load models", error));
-  const body = await api("/api/projects");
+  const [, body] = await Promise.all([
+    loadModels().catch((error) => console.warn("Could not load models", error)),
+    api("/api/projects"),
+  ]);
   state.projects = body.projects;
+
+  if (state.initialProjectId) {
+    state.activeProjectId = state.initialProjectId;
+    localStorage.setItem("piWebActiveProjectId", state.initialProjectId);
+  }
+  if (state.initialSessionPath) {
+    state.activeSessionPath = state.initialSessionPath;
+    localStorage.setItem("piWebActiveSessionPath", state.initialSessionPath);
+  }
 
   if (state.activeProjectId && !state.projects.some((project) => project.id === state.activeProjectId)) {
     state.activeProjectId = null;
@@ -666,6 +825,7 @@ function handleSocketMessage(payload) {
     for (const message of payload.messages || []) appendMessage(message.role === "user" ? "user" : "assistant", message.text);
     if (payload.models) setModels(payload.models);
     updateStatus(payload.status);
+    subscribeToPush().catch((error) => console.warn("Push subscription failed", error));
     refreshSessionsQuietly();
     return;
   }
@@ -725,16 +885,24 @@ function handleSocketMessage(payload) {
   if (payload.type === "toolEnd") {
     const bubble = state.toolBubbles.get(payload.toolCallId) || appendMessage("tool-output", `${payload.toolName}\n`);
     renderBubbleContent(bubble, `${payload.toolName}${payload.isError ? " failed" : " done"}\n${payload.text || ""}`);
+    state.toolBubbles.delete(payload.toolCallId);
     return;
   }
   if (payload.type === "assistantError") {
     clearThinkingBubble();
     appendMessage("tool", `Pi error: ${payload.error}`);
   }
-  if (payload.type === "agent_start") setStatus("Pi is working", true);
+  if (payload.type === "agent_start") {
+    setStatus("Pi is working", true);
+    state.lastTurnStartedAt = Date.now();
+  }
   if (payload.type === "agent_end") {
     clearThinkingBubble();
     setStatus("Connected", true);
+    if (state.lastTurnStartedAt) {
+      maybeNotifyTurnComplete().catch((error) => console.warn("Notification failed", error));
+      state.lastTurnStartedAt = 0;
+    }
   }
   if (payload.type === "queueUpdate") elements.miniStatus.textContent = `${payload.pending || 0} queued messages`;
   if (payload.type === "sessionInfoChanged" && payload.name) elements.sessionTitle.textContent = payload.name;
@@ -765,7 +933,12 @@ elements.projectForm.addEventListener("submit", async (event) => {
   try {
     const project = await api("/api/projects", {
       method: "POST",
-      body: JSON.stringify({ name: elements.projectNameInput.value, path: elements.projectPathInput.value }),
+      body: JSON.stringify({
+        name: elements.projectNameInput.value,
+        path: elements.projectPathInput.value,
+        synced: elements.projectSyncedInput.checked,
+        macPath: elements.projectMacPathInput.value,
+      }),
     });
     elements.projectDialog.close();
     elements.projectForm.reset();
@@ -788,9 +961,11 @@ elements.composer.addEventListener("submit", (event) => {
     textAttachments: state.attachments.filter((attachment) => attachment.kind === "text").map(({ name, mimeType, content }) => ({ name, mimeType, content })),
   };
   if (!sendSocket(payload)) return;
+  state.lastTurnStartedAt = Date.now();
   elements.messageInput.value = "";
   elements.messageInput.style.height = "auto";
   clearAttachments();
+  stickyScroll(true);
 });
 
 elements.renameSessionButton.addEventListener("click", () => {
@@ -804,7 +979,20 @@ elements.renameForm.addEventListener("submit", (event) => {
   elements.renameDialog.close();
 });
 elements.cycleModelButton.addEventListener("click", () => sendSocket({ type: "cycleModel" }));
+elements.notifyButton.addEventListener("click", () => {
+  if (state.notificationsEnabled) disableNotifications().catch((error) => toast(error.message));
+  else enableNotifications().catch((error) => toast(error.message));
+});
 elements.abortButton.addEventListener("click", () => sendSocket({ type: "abort" }));
+elements.messages.addEventListener(
+  "scroll",
+  () => {
+    state.stickToBottom = isNearBottom();
+    syncJumpButton();
+  },
+  { passive: true },
+);
+elements.jumpLatestButton.addEventListener("click", () => stickyScroll(true));
 async function promptInstall() {
   if (!state.installPromptEvent) return;
   const promptEvent = state.installPromptEvent;
@@ -880,5 +1068,6 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+syncNotifyButton();
 updateInstallButton();
 loadProjects().catch((error) => toast(error.message));

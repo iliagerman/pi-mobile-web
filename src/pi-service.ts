@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import {
   AuthStorage,
   createAgentSession,
@@ -181,20 +182,22 @@ export function simplifyMessages(messages: unknown[]): ChatMessage[] {
 
 export async function listPiSessions(cwd: string): Promise<SessionSummary[]> {
   const sessions = (await SessionManager.list(cwd)) as unknown[];
-  return sessions
-    .map((sessionInfo) => {
-      const record = asRecord(sessionInfo);
-      return {
-        id: String(record.id ?? record.path ?? randomUUID()),
-        path: String(record.path ?? ""),
-        title: titleFromSession(record),
-        createdAt: typeof record.createdAt === "string" ? record.createdAt : undefined,
-        updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : undefined,
-        firstMessage: typeof record.firstMessage === "string" ? record.firstMessage : undefined,
-      };
-    })
+  const summaries = await Promise.all(sessions.map(async (sessionInfo) => {
+    const record = asRecord(sessionInfo);
+    const sessionPath = String(record.path ?? "");
+    const fileStat = sessionPath ? await stat(sessionPath) : undefined;
+    return {
+      id: String(record.id ?? record.path ?? randomUUID()),
+      path: sessionPath,
+      title: titleFromSession(record),
+      createdAt: typeof record.created === "string" ? record.created : fileStat?.birthtime.toISOString(),
+      updatedAt: typeof record.modified === "string" ? record.modified : fileStat?.mtime.toISOString(),
+      firstMessage: typeof record.firstMessage === "string" ? record.firstMessage : undefined,
+    };
+  }));
+  return summaries
     .sort((left, right) => (right.updatedAt ?? right.createdAt ?? "").localeCompare(left.updatedAt ?? left.createdAt ?? ""))
-    .slice(0, 10);
+    .slice(0, 20);
 }
 
 export async function createPiSession(options: PiSessionOptions): Promise<PiSessionHandle> {

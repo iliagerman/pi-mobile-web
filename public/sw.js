@@ -1,4 +1,4 @@
-const CACHE_NAME = "pi-mobile-console-v5";
+const CACHE_NAME = "pi-mobile-console-v12";
 const APP_SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/markdown.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -11,6 +11,33 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))),
   );
   self.clients.claim();
+});
+
+self.addEventListener("push", (event) => {
+  const payload = event.data ? event.data.json() : {};
+  event.waitUntil(self.registration.showNotification(payload.title || "Pi finished", {
+    body: payload.body || "Tap to open the conversation.",
+    tag: payload.url || "pi-mobile-web",
+    renotify: true,
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: { url: payload.url || "/" },
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      const client = windowClients.find((candidate) => candidate.url === targetUrl) || windowClients[0];
+      if (client) {
+        client.navigate(targetUrl);
+        return client.focus();
+      }
+      return self.clients.openWindow(targetUrl);
+    }),
+  );
 });
 
 self.addEventListener("fetch", (event) => {

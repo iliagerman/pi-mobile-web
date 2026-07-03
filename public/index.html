@@ -2,12 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Pi Mobile Console</title>
-    <meta name="theme-color" content="#080908" />
+    <meta name="theme-color" content="#f4efe6" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Pi Console" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
@@ -57,6 +57,7 @@
           <div class="chat-actions">
             <div class="model-shortcuts" id="modelShortcuts" aria-label="Model shortcuts"></div>
             <button class="ghost compact" id="cycleModelButton" type="button" disabled>Cycle</button>
+            <button class="ghost compact" id="notifyButton" type="button" aria-pressed="false" title="Notify when Pi finishes">Notify</button>
             <button class="ghost compact" id="installAppButton" type="button" hidden>Install</button>
             <button class="ghost compact" id="renameSessionButton" type="button" disabled>Rename</button>
             <button class="ghost compact danger" id="abortButton" type="button" disabled>Stop</button>
@@ -70,6 +71,7 @@
             <h2>Your server-side Pi, in your pocket.</h2>
             <p>Select a project, start a Pi instance, and stream coding-agent work from your phone over Tailscale.</p>
           </div>
+          <button class="jump-latest" id="jumpLatestButton" type="button" hidden>↓ Latest</button>
         </section>
 
         <div class="command-strip" aria-label="Quick slash commands">
@@ -140,9 +142,18 @@
           <input id="projectNameInput" name="name" autocomplete="off" placeholder="Home assistant plugins" required />
         </label>
         <label>
-          Local folder path
+          Homeserver folder path
           <input id="projectPathInput" name="path" autocomplete="off" placeholder="/home/you/code/project" required />
         </label>
+        <label class="checkbox-row">
+          <input id="projectSyncedInput" name="synced" type="checkbox" />
+          Add Syncthing setup
+        </label>
+        <label>
+          Mac folder path <span class="muted">optional</span>
+          <input id="projectMacPathInput" name="macPath" autocomplete="off" placeholder="/Users/you/Work/project" />
+        </label>
+        <p class="muted compact-copy">Creates AGENTS.md with sync instructions. If Syncthing API env vars are configured, the homeserver folder is added automatically.</p>
         <div class="dialog-actions">
           <button class="ghost" value="cancel" type="button" id="cancelProjectButton">Cancel</button>
           <button class="primary" value="default" type="submit">Create project</button>

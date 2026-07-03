@@ -145,6 +145,10 @@ tailscale serve reset
 | `PORT` | `8787` | HTTP/WebSocket port listened on `0.0.0.0`. |
 | `PI_WEB_TOKEN` | empty | Optional token required for API and WebSocket access. |
 | `PI_WEB_DATA_DIR` | `~/.pi-mobile-web` | Directory containing `projects.json`, the shared project registry. |
+| `PI_MOBILE_WEB_SYNCTHING_URL` | empty | Optional Syncthing API URL, for example `http://127.0.0.1:8384`. |
+| `PI_MOBILE_WEB_SYNCTHING_API_KEY` | empty | Optional Syncthing API key used when creating a synced project. |
+| `PI_MOBILE_WEB_SYNCTHING_MAC_DEVICE_ID` | empty | Optional Mac Syncthing device ID to share new synced projects with. |
+| `PI_MOBILE_WEB_SYNCTHING_MAC_BASE_PATH` | empty | Optional default Mac parent folder used in generated agent instructions. |
 
 Pi sessions are stored through Pi's normal session manager for each project working directory. The web app runs Pi with the same OS user and permissions as the Node process.
 

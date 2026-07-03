@@ -1,6 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from "express";
-import { timingSafeEqual } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +17,7 @@ import {
   setSessionModel,
   simplifyMessages,
 } from "./pi-service.js";
+import { deletePushSubscription, getVapidPublicKey, notifySessionFinished, savePushSubscription } from "./push.js";
 
 type PiSessionHandle = Awaited<ReturnType<typeof createPiSession>>;
 
@@ -24,6 +26,7 @@ interface SharedPiSession {
   unsubscribe: () => void;
   clients: Set<WebSocket>;
   key: string;
+  projectId: string;
   idleTimer: NodeJS.Timeout | null;
 }
 
@@ -40,6 +43,8 @@ const idleSessionTimeoutMs = 30 * 60 * 1000;
 const projectSchema = z.object({
   name: z.string().trim().min(1).max(80),
   path: z.string().trim().min(1).max(1000),
+  synced: z.boolean().optional(),
+  macPath: z.string().trim().max(1000).optional(),
 });
 const imageAttachmentSchema = z.object({
   name: z.string().trim().min(1).max(240),
@@ -50,6 +55,22 @@ const textAttachmentSchema = z.object({
   name: z.string().trim().min(1).max(240),
   mimeType: z.string().trim().min(1).max(120),
   content: z.string().max(120_000),
+});
+const pushSubscriptionSchema = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+const pushSubscribeSchema = z.object({
+  subscription: pushSubscriptionSchema,
+  projectId: z.string().min(1),
+  sessionPath: z.string().min(1),
+  title: z.string().trim().max(120).optional(),
+});
+const pushUnsubscribeSchema = z.object({
+  endpoint: z.string().url(),
 });
 const socketMessageSchema = z.object({
   type: z.string().max(40),
@@ -113,6 +134,34 @@ app.get("/api/health", (_request, response) => {
   response.json({ status: "ok" });
 });
 
+app.get("/api/push/vapid-public-key", async (_request, response, next) => {
+  try {
+    response.json({ publicKey: await getVapidPublicKey() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/push/subscribe", async (request, response, next) => {
+  try {
+    const payload = pushSubscribeSchema.parse(request.body);
+    await savePushSubscription(payload.subscription, payload.projectId, payload.sessionPath, payload.title || "Pi");
+    response.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/push/unsubscribe", async (request, response, next) => {
+  try {
+    const payload = pushUnsubscribeSchema.parse(request.body);
+    await deletePushSubscription(payload.endpoint);
+    response.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/models", async (_request, response, next) => {
   try {
     response.json({ models: await listAvailableModels() });
@@ -132,7 +181,7 @@ app.get("/api/projects", async (_request, response, next) => {
 app.post("/api/projects", async (request, response, next) => {
   try {
     const payload = projectSchema.parse(request.body);
-    const project = await addProject(payload.name, payload.path);
+    const project = await addProject(payload.name, payload.path, { synced: payload.synced, macPath: payload.macPath });
     response.status(201).json({ project });
   } catch (error) {
     next(error);
@@ -176,6 +225,45 @@ app.delete("/api/projects/:projectId/sessions", async (request, response, next) 
     }
     await rm(path.resolve(sessionPath), { force: true });
     response.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/projects/:projectId/file", async (request, response, next) => {
+  try {
+    const project = await getProject(request.params.projectId);
+    if (!project) {
+      sendError(response, 404, "Project not found");
+      return;
+    }
+    const requestedPath = typeof request.query.path === "string" ? request.query.path : "";
+    if (!requestedPath.trim()) {
+      sendError(response, 400, "File path is required");
+      return;
+    }
+    const projectRoot = path.resolve(project.path);
+    const resolved = path.resolve(projectRoot, requestedPath);
+    const relative = path.relative(projectRoot, resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      sendError(response, 403, "File is outside the project directory");
+      return;
+    }
+    let info;
+    try {
+      info = await stat(resolved);
+    } catch {
+      sendError(response, 404, "File not found");
+      return;
+    }
+    if (!info.isFile()) {
+      sendError(response, 400, "Path is not a file");
+      return;
+    }
+    const fileName = path.basename(resolved);
+    response.setHeader("Content-Disposition", `attachment; filename="${fileName.replace(/["\r\n]/g, "")}"`);
+    response.setHeader("Content-Length", String(info.size));
+    createReadStream(resolved).pipe(response);
   } catch (error) {
     next(error);
   }
@@ -237,7 +325,7 @@ function scheduleIdleDispose(session: SharedPiSession): void {
   }, idleSessionTimeoutMs);
 }
 
-async function getSharedSession(cwd: string, sessionPath: string | undefined): Promise<SharedPiSession> {
+async function getSharedSession(projectId: string, cwd: string, sessionPath: string | undefined): Promise<SharedPiSession> {
   if (sessionPath) {
     const existing = sharedSessions.get(sessionKey(cwd, sessionPath));
     if (existing) {
@@ -253,12 +341,17 @@ async function getSharedSession(cwd: string, sessionPath: string | undefined): P
     unsubscribe: () => undefined,
     clients: new Set(),
     key,
+    projectId,
     idleTimer: null,
   };
   session.unsubscribe = handle.session.subscribe((event) => {
     broadcast(session, eventPayload(event));
     if (event.type === "message_end" || event.type === "turn_end" || event.type === "agent_end") {
       broadcast(session, { type: "status", status: getSessionStatus(handle.session) });
+      const finishedSessionPath = handle.session.sessionFile;
+      if (finishedSessionPath) {
+        notifySessionFinished(session.projectId, finishedSessionPath, handle.session.sessionName || "Pi").catch((error) => console.warn("Push notification failed", error));
+      }
       if (!session.clients.size) scheduleIdleDispose(session);
     }
   });
@@ -275,12 +368,12 @@ function promptDisplayText(message: string, imageNames: string[], textAttachment
   return body ? `${body}\n\n${suffix}` : suffix;
 }
 
-function promptTextWithAttachments(message: string, imageNames: string[], textAttachments: Array<{ name: string; content: string }>): string {
+function promptTextWithAttachments(message: string, imageAttachments: Array<{ name: string; path: string }>, textAttachments: Array<{ name: string; content: string }>): string {
   const parts: string[] = [];
   const body = message.trim();
   if (body) parts.push(body);
-  if (imageNames.length) {
-    parts.push(`Image attachments: ${imageNames.join(", ")}. Analyze them alongside the request.`);
+  if (imageAttachments.length) {
+    parts.push(`Image attachments:\n${imageAttachments.map((image) => `- ${image.name}: ${image.path}`).join("\n")}\nAnalyze them alongside the request. Use these paths when a tool needs the original image file.`);
   }
   for (const attachment of textAttachments) {
     parts.push(`Attachment: ${attachment.name}\n\n\`\`\`\n${attachment.content}\n\`\`\``);
@@ -288,15 +381,32 @@ function promptTextWithAttachments(message: string, imageNames: string[], textAt
   return parts.join("\n\n").trim();
 }
 
-async function handleSocketCommand(socket: WebSocket, handle: PiSessionHandle, raw: Buffer): Promise<void> {
+function safeAttachmentName(name: string): string {
+  return path.basename(name).replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function persistImageAttachments(cwd: string, images: Array<{ name: string; data: string }>): Promise<Array<{ name: string; path: string }>> {
+  if (!images.length) return [];
+  const attachmentDir = path.join(cwd, ".pi-mobile-web-attachments");
+  await mkdir(attachmentDir, { recursive: true });
+  const savedImages: Array<{ name: string; path: string }> = [];
+  for (const image of images) {
+    const filePath = path.join(attachmentDir, `${Date.now()}-${randomUUID()}-${safeAttachmentName(image.name)}`);
+    await writeFile(filePath, Buffer.from(image.data, "base64"));
+    savedImages.push({ name: image.name, path: filePath });
+  }
+  return savedImages;
+}
+
+async function handleSocketCommand(socket: WebSocket, handle: PiSessionHandle, cwd: string, raw: Buffer): Promise<void> {
   const payload = socketMessageSchema.parse(JSON.parse(raw.toString()));
 
   if (payload.type === "prompt") {
-    const imageNames = (payload.images ?? []).map((image) => image.name);
     const textAttachments = payload.textAttachments ?? [];
-    const promptText = promptTextWithAttachments(payload.message ?? "", imageNames, textAttachments);
+    const imageAttachments = await persistImageAttachments(cwd, payload.images ?? []);
+    const promptText = promptTextWithAttachments(payload.message ?? "", imageAttachments, textAttachments);
     if (!promptText) return;
-    send(socket, { type: "userMessage", text: promptDisplayText(payload.message ?? "", imageNames, textAttachments.map((attachment) => attachment.name)) });
+    send(socket, { type: "userMessage", text: promptDisplayText(payload.message ?? "", imageAttachments.map((image) => image.name), textAttachments.map((attachment) => attachment.name)) });
     const options = {
       ...(handle.session.isStreaming ? { streamingBehavior: "followUp" as const } : {}),
       ...(payload.images?.length
@@ -384,7 +494,7 @@ webSocketServer.on("connection", async (socket, request) => {
 
   let sharedSession: SharedPiSession;
   try {
-    sharedSession = await getSharedSession(project.path, parseSessionPath(url.searchParams.get("sessionPath")));
+    sharedSession = await getSharedSession(project.id, project.path, parseSessionPath(url.searchParams.get("sessionPath")));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start Pi session";
     send(socket, { type: "error", error: message });
@@ -406,7 +516,7 @@ webSocketServer.on("connection", async (socket, request) => {
 
   socket.on("message", async (raw) => {
     try {
-      await handleSocketCommand(socket, handle, raw as Buffer);
+      await handleSocketCommand(socket, handle, project.path, raw as Buffer);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Command failed";
       send(socket, { type: "error", error: message });

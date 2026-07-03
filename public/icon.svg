@@ -1,29 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Pi Console icon">
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#0b0f0b"/>
-      <stop offset="1" stop-color="#121912"/>
+      <stop offset="0" stop-color="#fffaf2"/>
+      <stop offset="1" stop-color="#eadfcc"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0" stop-color="#c8ff4d"/>
-      <stop offset="1" stop-color="#58ff9a"/>
+      <stop offset="0" stop-color="#2f6f73"/>
+      <stop offset="1" stop-color="#e46f52"/>
     </linearGradient>
-    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="18" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#4c371f" flood-opacity="0.20"/>
     </filter>
   </defs>
 
-  <rect width="512" height="512" rx="120" fill="url(#bg)"/>
-  <circle cx="122" cy="110" r="98" fill="#c8ff4d" opacity="0.14"/>
-  <circle cx="404" cy="154" r="118" fill="#58ff9a" opacity="0.12"/>
+  <rect width="512" height="512" rx="118" fill="url(#bg)"/>
+  <circle cx="118" cy="112" r="104" fill="#e46f52" opacity="0.18"/>
+  <circle cx="404" cy="150" r="124" fill="#2f6f73" opacity="0.18"/>
+  <circle cx="270" cy="430" r="120" fill="#bd8f36" opacity="0.14"/>
 
-  <rect x="76" y="76" width="360" height="360" rx="92" fill="#0a0d0a" stroke="rgba(205,255,188,0.18)" stroke-width="4"/>
-  <rect x="114" y="114" width="284" height="284" rx="70" fill="url(#accent)" filter="url(#glow)"/>
+  <rect x="74" y="74" width="364" height="364" rx="96" fill="#fffaf2" stroke="#362d21" stroke-opacity="0.13" stroke-width="5" filter="url(#shadow)"/>
+  <rect x="114" y="114" width="284" height="284" rx="78" fill="url(#accent)"/>
 
-  <path d="M183 169h44v45c10-8 22-13 38-13 49 0 80 32 80 84 0 59-36 95-92 95-28 0-53-9-70-19v-49c20 13 42 22 63 22 31 0 49-16 49-47 0-29-18-45-47-45-17 0-32 5-43 15h-22z" fill="#10140d"/>
-  <rect x="168" y="147" width="28" height="235" rx="14" fill="#10140d"/>
+  <path d="M183 169h44v45c10-8 22-13 38-13 49 0 80 32 80 84 0 59-36 95-92 95-28 0-53-9-70-19v-49c20 13 42 22 63 22 31 0 49-16 49-47 0-29-18-45-47-45-17 0-32 5-43 15h-22z" fill="#fffaf2"/>
+  <rect x="168" y="147" width="28" height="235" rx="14" fill="#fffaf2"/>
 </svg>
