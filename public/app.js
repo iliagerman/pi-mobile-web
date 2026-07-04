@@ -816,7 +816,7 @@ function handleSocketMessage(payload) {
     return;
   }
   if (payload.type === "ready") {
-    setComposerEnabled(true);
+    setComposerEnabled(!payload.readOnly);
     state.activeSessionPath = payload.sessionFile;
     if (payload.sessionFile) localStorage.setItem("piWebActiveSessionPath", payload.sessionFile);
     const matchingSession = state.sessions.find((session) => session.path === payload.sessionFile);
@@ -824,8 +824,9 @@ function handleSocketMessage(payload) {
     clearChat();
     for (const message of payload.messages || []) appendMessage(message.role === "user" ? "user" : "assistant", message.text);
     if (payload.models) setModels(payload.models);
-    updateStatus(payload.status);
-    subscribeToPush().catch((error) => console.warn("Push subscription failed", error));
+    if (payload.readOnly) elements.miniStatus.textContent = "Claude transcript • read-only";
+    else updateStatus(payload.status);
+    if (!payload.readOnly) subscribeToPush().catch((error) => console.warn("Push subscription failed", error));
     refreshSessionsQuietly();
     return;
   }

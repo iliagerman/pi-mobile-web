@@ -14,6 +14,7 @@ import {
   getSessionStatus,
   listAvailableModels,
   listPiSessions,
+  loadClaudeMessages,
   setSessionModel,
   simplifyMessages,
 } from "./pi-service.js";
@@ -492,9 +493,27 @@ webSocketServer.on("connection", async (socket, request) => {
     return;
   }
 
+  const requestedSessionPath = parseSessionPath(url.searchParams.get("sessionPath"));
+  if (requestedSessionPath?.startsWith("claude:")) {
+    try {
+      send(socket, {
+        type: "ready",
+        project,
+        sessionId: requestedSessionPath,
+        sessionFile: requestedSessionPath,
+        messages: await loadClaudeMessages(requestedSessionPath),
+        models: await listAvailableModels(),
+        readOnly: true,
+      });
+    } catch (error) {
+      send(socket, { type: "error", error: error instanceof Error ? error.message : "Could not load Claude session" });
+    }
+    return;
+  }
+
   let sharedSession: SharedPiSession;
   try {
-    sharedSession = await getSharedSession(project.id, project.path, parseSessionPath(url.searchParams.get("sessionPath")));
+    sharedSession = await getSharedSession(project.id, project.path, requestedSessionPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start Pi session";
     send(socket, { type: "error", error: message });
