@@ -180,22 +180,37 @@ export function simplifyMessages(messages: unknown[]): ChatMessage[] {
     .filter((message) => message.text.trim().length > 0);
 }
 
+function sessionCwds(cwd: string): string[] {
+  const macWork = "/Users/iliagerman/Work/personal_projects";
+  const homeserverWork = "/home/ilia/Work/personal_projects";
+  if (cwd.startsWith(`${homeserverWork}/`)) return [cwd, `${macWork}${cwd.slice(homeserverWork.length)}`];
+  return [cwd];
+}
+
+async function summarizeSession(sessionInfo: unknown): Promise<SessionSummary> {
+  const record = asRecord(sessionInfo);
+  const sessionPath = String(record.path ?? "");
+  const fileStat = sessionPath ? await stat(sessionPath) : undefined;
+  return {
+    id: String(record.id ?? record.path ?? randomUUID()),
+    path: sessionPath,
+    title: titleFromSession(record),
+    createdAt: typeof record.created === "string" ? record.created : fileStat?.birthtime.toISOString(),
+    updatedAt: typeof record.modified === "string" ? record.modified : fileStat?.mtime.toISOString(),
+    firstMessage: typeof record.firstMessage === "string" ? record.firstMessage : undefined,
+  };
+}
+
 export async function listPiSessions(cwd: string): Promise<SessionSummary[]> {
-  const sessions = (await SessionManager.list(cwd)) as unknown[];
-  const summaries = await Promise.all(sessions.map(async (sessionInfo) => {
-    const record = asRecord(sessionInfo);
-    const sessionPath = String(record.path ?? "");
-    const fileStat = sessionPath ? await stat(sessionPath) : undefined;
-    return {
-      id: String(record.id ?? record.path ?? randomUUID()),
-      path: sessionPath,
-      title: titleFromSession(record),
-      createdAt: typeof record.created === "string" ? record.created : fileStat?.birthtime.toISOString(),
-      updatedAt: typeof record.modified === "string" ? record.modified : fileStat?.mtime.toISOString(),
-      firstMessage: typeof record.firstMessage === "string" ? record.firstMessage : undefined,
-    };
-  }));
+  const sessions = (await Promise.all(sessionCwds(cwd).map((sessionCwd) => SessionManager.list(sessionCwd)))) as unknown[][];
+  const summaries = await Promise.all(sessions.flat().map(summarizeSession));
+  const seen = new Set<string>();
   return summaries
+    .filter((session) => {
+      if (!session.path || seen.has(session.path)) return false;
+      seen.add(session.path);
+      return true;
+    })
     .sort((left, right) => (right.updatedAt ?? right.createdAt ?? "").localeCompare(left.updatedAt ?? left.createdAt ?? ""))
     .slice(0, 20);
 }
