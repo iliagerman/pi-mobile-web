@@ -194,6 +194,10 @@ function claudeProjectDir(cwd: string): string {
   return path.join(os.homedir(), ".claude/projects", encoded);
 }
 
+function claudeProjectDirs(cwd: string): string[] {
+  return [...new Set(sessionCwds(cwd).flatMap((sessionCwd) => [sessionCwd, path.dirname(sessionCwd)]).map(claudeProjectDir))];
+}
+
 function textFromClaudeContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -206,8 +210,8 @@ function claudeMessageText(record: UnknownRecord): string {
 }
 
 async function listClaudeSessions(cwd: string): Promise<SessionSummary[]> {
-  const dirs = sessionCwds(cwd).map(claudeProjectDir);
-  const files = (await Promise.all(dirs.map(async (dir) => {
+  const cwds = new Set(sessionCwds(cwd));
+  const files = (await Promise.all(claudeProjectDirs(cwd).map(async (dir) => {
     try {
       return (await readdir(dir)).filter((file) => file.endsWith(".jsonl")).map((file) => path.join(dir, file));
     } catch {
@@ -215,10 +219,11 @@ async function listClaudeSessions(cwd: string): Promise<SessionSummary[]> {
     }
   }))).flat();
 
-  return Promise.all(files.map(async (filePath) => {
+  const summaries = await Promise.all(files.map(async (filePath): Promise<SessionSummary | null> => {
     const fileStat = await stat(filePath);
-    const lines = (await readFile(filePath, "utf8")).split("\n").filter(Boolean);
-    const first = lines.map((line) => JSON.parse(line) as UnknownRecord).find((record) => record.type === "user" && claudeMessageText(record).trim());
+    const records = (await readFile(filePath, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line) as UnknownRecord);
+    if (!records.some((record) => cwds.has(String(record.cwd ?? "")))) return null;
+    const first = records.find((record) => record.type === "user" && claudeMessageText(record).trim());
     const title = claudeMessageText(first ?? {}).trim().split("\n")[0].slice(0, 80) || "Claude conversation";
     return {
       id: `claude:${path.basename(filePath)}`,
@@ -229,6 +234,7 @@ async function listClaudeSessions(cwd: string): Promise<SessionSummary[]> {
       firstMessage: title,
     };
   }));
+  return summaries.filter((summary): summary is SessionSummary => Boolean(summary));
 }
 
 export async function loadClaudeMessages(sessionPath: string): Promise<ChatMessage[]> {
