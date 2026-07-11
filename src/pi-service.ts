@@ -140,8 +140,9 @@ function preferredModel(): AvailableModel | undefined {
   const available = modelRegistry.getAvailable();
   return (
     configuredPreferredModel() ??
-    available.find((model) => model.provider === "openai" && model.id === "gpt-5.5") ??
-    available.find((model) => model.provider === "openai-codex" && model.id === "gpt-5.4") ??
+    available.find((model) => model.provider === "openai-codex" && model.id === "gpt-5.6-sol") ??
+    available.find((model) => model.provider === "openai-codex" && model.id === "gpt-5.6-terra") ??
+    available.find((model) => model.provider === "openai-codex" && model.id === "gpt-5.6-luna") ??
     available.find((model) => model.provider === "google" && model.id === "gemini-3.1-pro-preview") ??
     available.find((model) => model.provider === "google" && model.id === "gemini-2.5-pro") ??
     available.find((model) => !isDeprecatedDefault(model)) ??

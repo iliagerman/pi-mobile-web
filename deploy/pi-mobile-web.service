@@ -17,7 +17,7 @@ Environment=PI_CLAUDE_MCP_AUTOLOAD=off
 # expand shell aliases, so keep the Headroom OpenAI-compatible base URL here.
 Environment="OPENAI_BASE_URL=http://127.0.0.1:8788/v1"
 Environment="PI_MOBILE_WEB_PI_ALIAS=pi-hr"
-Environment="PI_MOBILE_WEB_MODEL=openai/gpt-5.5"
+Environment="PI_MOBILE_WEB_MODEL=openai-codex/gpt-5.6-sol"
 # PATH is filled in by scripts/install-service.sh so npm/node and shelled-out
 # tools resolve under user systemd.
 Environment="PATH=__SERVICE_PATH__"

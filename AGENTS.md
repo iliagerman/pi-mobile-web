@@ -40,13 +40,13 @@ with:
 [Service]
 Environment="OPENAI_BASE_URL=http://127.0.0.1:8788/v1"
 Environment="PI_MOBILE_WEB_PI_ALIAS=pi-hr"
-Environment="PI_MOBILE_WEB_MODEL=openai/gpt-5.5"
+Environment="PI_MOBILE_WEB_MODEL=openai-codex/gpt-5.6-sol"
 ```
 
 This mirrors the interactive homeserver alias:
 
 ```bash
-alias pi-hr='OPENAI_BASE_URL=http://127.0.0.1:8788/v1 pi --model openai/gpt-5.5'
+alias pi-hr='OPENAI_BASE_URL=http://127.0.0.1:8788/v1 pi --model openai-codex/gpt-5.6-sol'
 ```
 
 Note: the web app starts via Node/SDK, not the `pi` CLI, so systemd uses the alias environment rather than invoking the alias command.

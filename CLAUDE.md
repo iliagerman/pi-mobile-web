@@ -28,13 +28,13 @@ with:
 [Service]
 Environment="OPENAI_BASE_URL=http://127.0.0.1:8788/v1"
 Environment="PI_MOBILE_WEB_PI_ALIAS=pi-hr"
-Environment="PI_MOBILE_WEB_MODEL=openai/gpt-5.5"
+Environment="PI_MOBILE_WEB_MODEL=openai-codex/gpt-5.6-sol"
 ```
 
 This mirrors the interactive alias:
 
 ```bash
-alias pi-hr='OPENAI_BASE_URL=http://127.0.0.1:8788/v1 pi --model openai/gpt-5.5'
+alias pi-hr='OPENAI_BASE_URL=http://127.0.0.1:8788/v1 pi --model openai-codex/gpt-5.6-sol'
 ```
 
 Do not change `ExecStart` to `pi-hr`; that alias runs the `pi` CLI, while this app is a Node/SDK service.

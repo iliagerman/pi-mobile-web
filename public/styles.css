@@ -249,7 +249,7 @@ label { display: grid; gap: 7px; min-width: 0; color: var(--muted); }
 input { min-width: 0; border-radius: 15px; padding: 12px 13px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-.mobile-only, .mobile-nav { display: none; }
+.mobile-nav { display: none; }
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--panel-strong); border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; box-shadow: var(--shadow); color: var(--text); z-index: 10; }
 .install-banner { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); width: min(560px, calc(100% - 24px)); display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--panel-strong); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow); z-index: 20; }
 .install-banner[hidden] { display: none; }
@@ -290,9 +290,7 @@ input { min-width: 0; border-radius: 15px; padding: 12px 13px; }
 @media (max-width: 620px) {
   .shell { padding: 4px; }
   .chat { height: calc(100dvh - 82px); border-radius: 16px; }
-  .chat-topbar { grid-template-columns: 38px minmax(0, 1fr); align-items: start; padding: 8px; gap: 7px; }
-  .menu-button { display: inline-grid; place-items: center; min-height: 36px; width: 38px; padding: 0; border-radius: 12px; font-size: 18px; }
-  .chat-title-block { grid-column: 2; }
+  .chat-topbar { grid-template-columns: minmax(0, 1fr); align-items: start; padding: 8px; gap: 7px; }
   .chat-topbar h2 { font-size: 15px; line-height: 1.15; }
   .eyebrow { font-size: 9px; letter-spacing: .13em; }
   .mini-status { font-size: 10px; max-width: 100%; }

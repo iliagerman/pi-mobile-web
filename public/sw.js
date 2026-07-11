@@ -1,4 +1,4 @@
-const CACHE_NAME = "pi-mobile-console-v12";
+const CACHE_NAME = "pi-mobile-console-v13";
 const APP_SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/markdown.js", "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {

@@ -63,7 +63,6 @@ const elements = {
   installBanner: document.querySelector("#installBanner"),
   installBannerButton: document.querySelector("#installBannerButton"),
   dismissInstallButton: document.querySelector("#dismissInstallButton"),
-  toggleProjectsButton: document.querySelector("#toggleProjectsButton"),
   navProjectsButton: document.querySelector("#navProjectsButton"),
   navSessionsButton: document.querySelector("#navSessionsButton"),
   navChatButton: document.querySelector("#navChatButton"),
@@ -602,9 +601,9 @@ function updateStatus(status) {
 
 function preferredUiModels(models) {
   const desired = [
-    { provider: "zai", id: "glm-5.2" },
-    { provider: "openai-codex", id: "gpt-5.5" },
-    { provider: "openai-codex", id: "gpt-5.4" },
+    { provider: "openai-codex", id: "gpt-5.6-sol" },
+    { provider: "openai-codex", id: "gpt-5.6-terra" },
+    { provider: "openai-codex", id: "gpt-5.6-luna" },
   ];
   return desired
     .map((target) => models.find((model) => model.provider === target.provider && model.id === target.id))
@@ -926,7 +925,6 @@ async function refreshSessionsQuietly() {
 elements.navProjectsButton.addEventListener("click", () => setMobileView("projects"));
 elements.navSessionsButton.addEventListener("click", () => setMobileView("sessions"));
 elements.navChatButton.addEventListener("click", () => setMobileView("chat"));
-elements.toggleProjectsButton.addEventListener("click", () => setMobileView(selectedProject() ? "sessions" : "projects"));
 elements.newProjectButton.addEventListener("click", () => elements.projectDialog.showModal());
 elements.cancelProjectButton.addEventListener("click", () => elements.projectDialog.close());
 elements.projectForm.addEventListener("submit", async (event) => {
